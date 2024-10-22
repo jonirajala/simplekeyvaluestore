@@ -1,13 +1,3 @@
-"""
-python3 -m pytest speedtest.py -s
-
-first version 22.10
-Inserting 1000 key-value pairs took 0.7074 seconds.
-Retrieving 1000 key-value pairs took 0.5389 seconds.
-Deleting 1000 key-value pairs took 0.6929 seconds.
-
-"""
-
 import pytest
 import time
 from fastapi.testclient import TestClient

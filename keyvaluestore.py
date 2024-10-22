@@ -41,26 +41,6 @@ Start with basic filesystem and move to a more effiecient one later
 
 ### GOAL IS TO HAVE ZERO DEPENDENCIES
 
-
-
-curl -X 'POST' \
-  'http://127.0.0.1:8000/put/' \
-  -H 'Content-Type: application/json' \
-  -d '{
-  "key": "exampleKey",
-  "value": "exampleValue"
-}'
-
-curl -X 'GET' \
-  'http://127.0.0.1:8000/get/exampleKey'
-
-
-curl -X 'DELETE' \
-  'http://127.0.0.1:8000/delete/exampleKey'
-
-curl -X 'GET' \
-  'http://127.0.0.1:8000/showdb/'
-  
 """
 import pickle
 from fastapi import FastAPI, HTTPException
@@ -110,18 +90,14 @@ class KVStore:
 
 
 
-# Initialize FastAPI app
 app = FastAPI()
 
-# Initialize the KVStore
 store = KVStore("kvstore.pkl")
 
-# Define request models
 class PutRequest(BaseModel):
     key: str
     value: str
 
-# Endpoint to get a value by key
 @app.get("/get/{key}")
 async def get_value(key: str):
     try:
@@ -130,13 +106,11 @@ async def get_value(key: str):
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-# Endpoint to add or update a key-value pair
 @app.post("/put/")
 async def put_value(request: PutRequest):
     store.put(request.key, request.value)
     return {"message": "Value inserted/updated successfully", "key": request.key, "value": request.value}
 
-# Endpoint to delete a key-value pair
 @app.delete("/delete/{key}")
 async def delete_value(key: str):
     try:
@@ -145,7 +119,6 @@ async def delete_value(key: str):
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-# Endpoint to show the entire key-value store
 @app.get("/showdb/")
 async def show_database():
     return {"database": store.get_all()}
