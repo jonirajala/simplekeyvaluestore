@@ -1,37 +1,33 @@
 # Simple Key-value store
 
-
 ## Usage
 
 python3 -m uvicorn keyvaluestore:app --reload
 
 curl -X 'POST' \
-  'http://127.0.0.1:8000/put/' \
-  -H 'Content-Type: application/json' \
-  -d '{
-  "key": "exampleKey",
-  "value": "exampleValue"
+ 'http://127.0.0.1:8000/put/' \
+ -H 'Content-Type: application/json' \
+ -d '{
+"key": "exampleKey",
+"value": "exampleValue"
 }'
 
 curl -X 'GET' \
-  'http://127.0.0.1:8000/get/exampleKey'
-
+ 'http://127.0.0.1:8000/get/exampleKey'
 
 curl -X 'DELETE' \
-  'http://127.0.0.1:8000/delete/exampleKey'
+ 'http://127.0.0.1:8000/delete/exampleKey'
 
 curl -X 'GET' \
-  'http://127.0.0.1:8000/showdb/'
-  
+ 'http://127.0.0.1:8000/showdb/'
 
 ## Testing
 
 python3 -m pytest speedtest.py -s
 python3 -m pytest test_kvstore.py
 
-
 ## Current performance
 
-Inserting 1000 key-value pairs took 0.7074 seconds.
-Retrieving 1000 key-value pairs took 0.5389 seconds.
-Deleting 1000 key-value pairs took 0.6929 seconds.
+- Inserting 1000 key-value pairs took 0.7074 seconds.
+- Retrieving 1000 key-value pairs took 0.5389 seconds.
+- Deleting 1000 key-value pairs took 0.6929 seconds.
