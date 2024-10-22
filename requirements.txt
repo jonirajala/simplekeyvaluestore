@@ -2,3 +2,4 @@ pytest
 fastapi
 pydantic
 httpx
+requests

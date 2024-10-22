@@ -1,15 +1,31 @@
 import pytest
 import time
-from fastapi.testclient import TestClient
-from keyvaluestore import app, store  # Replace 'keyvaluestore' with your actual Python file name
+import requests
+import threading
+from time import sleep
+from keyvaluestore import run  # Replace with the actual name of your server module
+import os
 
-client = TestClient(app)
+BASE_URL = "http://localhost:8000"
 
+@pytest.fixture(scope="module", autouse=True)
+def start_server():
+    os.environ['DISABLE_LOGS'] = '1'
+  # Run the server in a separate thread to allow testing
+    server_thread = threading.Thread(target=run, daemon=True)
+    server_thread.start()
+    sleep(1)  # Give the server some time to start
+    yield
+    # No explicit shutdown mechanism; server will stop when the test exits due to daemon=True
+
+  
 @pytest.fixture(autouse=True)
 def clear_store():
-    # Clear the store before each test
-    store.store.clear()
-    store._save()
+    # Assuming your server has an endpoint to clear the store. If not, you'll need to implement it.
+    response = requests.get(f"{BASE_URL}/showdb/")
+    data = response.json()
+    for key in data.get("database", {}):
+        requests.delete(f"{BASE_URL}/delete/{key}")
 
 def test_speed_of_inserts():
     num_operations = 1000  # Adjust this value based on the performance you'd like to measure
@@ -19,7 +35,7 @@ def test_speed_of_inserts():
     for i in range(num_operations):
         key = f"key{i}"
         value = f"value{i}"
-        response = client.post("/put/", json={"key": key, "value": value})
+        response = requests.post(f"{BASE_URL}/put/", json={"key": key, "value": value})
         assert response.status_code == 200
     
     end_time = time.time()
@@ -33,14 +49,14 @@ def test_speed_of_retrievals():
     for i in range(num_operations):
         key = f"key{i}"
         value = f"value{i}"
-        client.post("/put/", json={"key": key, "value": value})
+        requests.post(f"{BASE_URL}/put/", json={"key": key, "value": value})
 
     start_time = time.time()
     
     # Retrieve all key-value pairs
     for i in range(num_operations):
         key = f"key{i}"
-        response = client.get(f"/get/{key}")
+        response = requests.get(f"{BASE_URL}/get/{key}")
         assert response.status_code == 200
         assert response.json()["value"] == f"value{i}"
     
@@ -55,14 +71,14 @@ def test_speed_of_deletes():
     for i in range(num_operations):
         key = f"key{i}"
         value = f"value{i}"
-        client.post("/put/", json={"key": key, "value": value})
+        requests.post(f"{BASE_URL}/put/", json={"key": key, "value": value})
 
     start_time = time.time()
     
     # Delete all key-value pairs
     for i in range(num_operations):
         key = f"key{i}"
-        response = client.delete(f"/delete/{key}")
+        response = requests.delete(f"{BASE_URL}/delete/{key}")
         assert response.status_code == 200
     
     end_time = time.time()

@@ -6,7 +6,6 @@ If multiple clients or threads can access the store simultaneously, you'll need 
 Locks: Use mutexes or other locking mechanisms to prevent race conditions when multiple clients access or modify the store concurrently.
 Optimistic Concurrency Control: Instead of locking, allow concurrent access and use a versioning mechanism to detect conflicts.
 
-
 6. Data Serialization
 When persisting data to disk or sending it over a network, you’ll need to convert the in-memory data (e.g., hash maps or trees) into a storable or transmittable format:
 Serialization Formats: Choose a format like JSON, XML, or binary for converting your key-value pairs to a byte stream.
@@ -42,83 +41,135 @@ Start with basic filesystem and move to a more effiecient one later
 ### GOAL IS TO HAVE ZERO DEPENDENCIES
 
 """
+
 import pickle
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+import json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import os
+import threading 
+import hashlib
+
+def hash_key(key, num_shards):
+        # Use a hash function to determine which shard to use
+        return int(hashlib.md5(key.encode()).hexdigest(), 16) % num_shards
 
 class KVStore:
-    def __init__(self, filename=None):
-        self.filename = filename
+    def __init__(self, shard_id, shard_dir='shards', num_shards=4):
+        self.shard_id = shard_id
+        self.shard_dir = shard_dir
+        self.num_shards = num_shards
+        self.lock = threading.Lock()
+
+        if not os.path.exists(self.shard_dir):
+            os.makedirs(self.shard_dir)
+        self.filename = f"{self.shard_dir}/shard_{self.shard_id}.pkl"
+
         try:
             self._load()
-            print(f"{self.filename} loaded successfully")
-        except FileNotFoundError:
+            print(f"Shard {self.shard_id} loaded successfully from {self.filename}")
+        except:
             self.store = {}
             self._save()
-            print(f"{self.filename} not found. New file created.")
-        
+            print(f"Shard {self.shard_id} created with new file {self.filename}")
+
+    
+
     def put(self, key, val):
-        # Insert or update a value associated with a key
-        self.store[key] = val
-        self._save()
+        shard_id = hash_key(key, self.num_shards)
+        if shard_id == self.shard_id:  # Only write to this shard if it matches
+            with self.lock:
+                self.store[key] = val
+                self._save()
 
     def get(self, key):
-        # Retrieve a value by its key
-        if not key in self.store:
-            raise KeyError(f"Key {key} not found.")  # Update the error message format
-
-        return self.store[key]
+        shard_id = hash_key(key, self.num_shards)
+        if shard_id == self.shard_id:
+            with self.lock:
+                if key not in self.store:
+                    raise KeyError(f"Key {key} not found.")
+                return self.store[key]
+        else:
+            raise KeyError(f"Key {key} not found in this shard.")
 
     def delete(self, key):
-        # Remove a key-value pair
-        if not key in self.store:
-            raise KeyError(f"Key {key} not found.")  # Update the error message format
-        del self.store[key]
-        self._save()
-    
+        shard_id = hash_key(key, self.num_shards)
+        if shard_id == self.shard_id:
+            with self.lock:
+                if key not in self.store:
+                    raise KeyError(f"Key {key} not found.")
+                del self.store[key]
+                self._save()
+
     def get_all(self):
-        # Return all key-value pairs
-        return self.store
+        with self.lock:
+            return self.store
 
     def _save(self):
         with open(self.filename, 'wb') as handle:
             pickle.dump(self.store, handle)
-    
+
     def _load(self):
         with open(self.filename, 'rb') as handle:
             self.store = pickle.load(handle)
 
 
+shards = [KVStore(i) for i in range(4)]  # Assuming 4 shards
 
-app = FastAPI()
+class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        if os.getenv('DISABLE_LOGS') == '1':
+            return
+        super().log_message(format, *args)
 
-store = KVStore("kvstore.pkl")
+    def _send_response(self, code, data):
+        self.send_response(code)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
 
-class PutRequest(BaseModel):
-    key: str
-    value: str
+    def do_GET(self):
+        if self.path.startswith("/get/"):
+            key = self.path.split("/get/")[1]
+            try:
+                shard_id = hash_key(key, len(shards))
+                value = shards[shard_id].get(key)
+                self._send_response(200, {"key": key, "value": value})
+            except KeyError as e:
+                self._send_response(404, {"error": str(e)})
+        elif self.path == "/showdb/":
+            all_data = {}
+            for shard in shards:
+                all_data.update(shard.get_all())
+            self._send_response(200, {"database": all_data})
+        else:
+            self._send_response(404, {"error": "Not found"})
 
-@app.get("/get/{key}")
-async def get_value(key: str):
-    try:
-        value = store.get(key)
-        return {"key": key, "value": value}
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    def do_POST(self):
+        if self.path == "/put/":
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data)
+            key = data.get("key")
+            value = data.get("value")
+            shard_id = int(hashlib.md5(key.encode()).hexdigest(), 16) % 4
+            shards[shard_id].put(key, value)
+            self._send_response(200, {"message": "Value inserted/updated successfully", "key": key, "value": value})
 
-@app.post("/put/")
-async def put_value(request: PutRequest):
-    store.put(request.key, request.value)
-    return {"message": "Value inserted/updated successfully", "key": request.key, "value": request.value}
+    def do_DELETE(self):
+        if self.path.startswith("/delete/"):
+            key = self.path.split("/delete/")[1]
+            shard_id = int(hashlib.md5(key.encode()).hexdigest(), 16) % 4
+            try:
+                shards[shard_id].delete(key)
+                self._send_response(200, {"message": f"Key '{key}' deleted successfully"})
+            except KeyError as e:
+                self._send_response(404, {"error": str(e)})
 
-@app.delete("/delete/{key}")
-async def delete_value(key: str):
-    try:
-        store.delete(key)
-        return {"message": f"Key '{key}' deleted successfully"}
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+def run(server_class=HTTPServer, handler_class=SimpleHTTPRequestHandler, port=8000):
+    server_address = ('', port)
+    httpd = server_class(server_address, handler_class)
+    print(f"Starting server on port {port}...")
+    httpd.serve_forever()
 
-@app.get("/showdb/")
-async def show_database():
-    return {"database": store.get_all()}
+if __name__ == '__main__':
+    run()
